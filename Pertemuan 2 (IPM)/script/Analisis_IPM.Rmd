@@ -1,0 +1,13 @@
+---
+title: "Analisis Regresi IPM Provinsi Bali"
+author: "Justin Julio C.T."
+output: html_document
+---
+# Pendahuluan
+Analisis ini menggunakan data Indeks Pembangunan Manusia (IPM) Provinsi Bali tahun 2010–2021. Data diambil dari Badan Pusat Statistik yang dapat diakses pada link berikut: https://www.bps.go.id/id/statistics-table/2/NDk0IzI=/-metode-baru-indeks-pembangunan-manusia-menurut-provinsi.html
+
+Analisis dilakukan menggunakan regresi linear dengan tahun sebagai variabel independen dan nilai IPM sebagai variabel dependen.
+
+Tujuan analisis adalah untuk mengetahui hubungan antara waktu dan perkembangan IPM serta mengidentifikasi kemungkinan adanya autokorelasi pada residual model.
+
+
