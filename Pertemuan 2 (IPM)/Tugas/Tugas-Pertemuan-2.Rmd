@@ -1,0 +1,157 @@
+---
+title: "Tugas-Pertemuan-2"
+author: "Justin Julio CT M0401241064"
+date: "2026-08-30"
+output: html_document
+---
+
+
+# 1. Import & Persiapan Data
+
+```{r}
+library(readxl)
+library(forecast)
+library(TTR)
+library(ggplot2)
+library(knitr)
+```
+
+```{r}
+path_file <- "C:\\Users\\yuuen\\OneDrive\\Documents\\Kuliah\\IPB\\Semester 5\\MPDW\\mpdw\\Pertemuan 2 (IPM)\\datatemperatur.xlsx"
+
+df <- read_excel(path_file)
+str(df)
+head(df)
+```
+
+```{r}
+data_ts <- ts(df$global_temperature_anomaly_C, start = c(2001, 8), frequency = 12)
+
+autoplot(data_ts) +
+  labs(title = "Global Temperature Anomaly (2001-2009)",
+       x = "Waktu", y = "Anomali Suhu (C)") +
+  theme_minimal()
+```
+
+# 2. Fungsi Bantu Perhitungan Akurasi
+
+```{r}
+calc_accuracy <- function(actual, fitted) {
+  
+  n <- min(length(actual), length(fitted))
+  actual <- actual[1:n]
+  fitted <- fitted[1:n]
+
+  error <- actual - fitted
+  valid <- !is.na(error) & !is.na(actual) & actual != 0
+
+  sse  <- sum(error[valid]^2)
+  mse  <- mean(error[valid]^2)
+  rmse <- sqrt(mse)
+  mape <- mean(abs(error[valid] / actual[valid])) * 100
+
+  data.frame(SSE = sse, MSE = mse, RMSE = rmse, MAPE = mape)
+}
+```
+
+
+# 3. Metode Pemulusan
+
+## 3.1 Simple Moving Average (SMA)
+
+```{r}
+n_sma <- 3
+sma_fit <- SMA(data_ts, n = n_sma)
+
+autoplot(data_ts, series = "Aktual") +
+  autolayer(sma_fit, series = paste0("SMA(", n_sma, ")")) +
+  labs(title = paste0("Simple Moving Average (order=", n_sma, ")"), y = "Anomali Suhu (C)") +
+  theme_minimal()
+
+acc_sma <- calc_accuracy(as.numeric(data_ts), as.numeric(sma_fit))
+```
+
+## 3.2 Double Moving Average (DMA)
+
+```{r}
+dma_fit <- SMA(sma_fit, n = n_sma)
+
+autoplot(data_ts, series = "Aktual") +
+  autolayer(dma_fit, series = paste0("DMA(", n_sma, ")")) +
+  labs(title = paste0("Double Moving Average (order=", n_sma, ")"), y = "Anomali Suhu (C)") +
+  theme_minimal()
+
+acc_dma <- calc_accuracy(as.numeric(data_ts), as.numeric(dma_fit))
+```
+
+## 3.3 Single Exponential Smoothing (SES)
+
+```{r}
+ses_fit <- ses(data_ts, h = 12)  # h = jumlah periode forecast ke depan
+summary(ses_fit$model)
+
+autoplot(ses_fit) +
+  labs(title = "Single Exponential Smoothing (SES)", y = "Anomali Suhu (C)") +
+  theme_minimal()
+
+acc_ses <- calc_accuracy(as.numeric(data_ts), as.numeric(fitted(ses_fit)))
+```
+
+## 3.4 Double Exponential Smoothing / Holt's Method (DES)
+
+```{r}
+des_fit <- holt(data_ts, h = 12)
+summary(des_fit$model)
+
+autoplot(des_fit) +
+  labs(title = "Double Exponential Smoothing (Holt)", y = "Anomali Suhu (C)") +
+  theme_minimal()
+
+acc_des <- calc_accuracy(as.numeric(data_ts), as.numeric(fitted(des_fit)))
+```
+
+## 3.5 Holt-Winters (Triple Exponential Smoothing)
+
+```{r}
+hw_fit <- hw(data_ts, h = 12, seasonal = "additive")
+summary(hw_fit$model)
+
+autoplot(hw_fit) +
+  labs(title = "Holt-Winters (Triple Exponential Smoothing)", y = "Anomali Suhu (C)") +
+  theme_minimal()
+
+acc_hw <- calc_accuracy(as.numeric(data_ts), as.numeric(fitted(hw_fit)))
+```
+
+# 4. Perbandingan Akurasi Antar Metode
+
+```{r}
+hasil <- rbind(
+  cbind(Metode = "SMA", acc_sma),
+  cbind(Metode = "DMA", acc_dma),
+  cbind(Metode = "SES", acc_ses),
+  cbind(Metode = "DES (Holt)", acc_des),
+  cbind(Metode = "Holt-Winters", acc_hw)
+)
+
+hasil <- hasil[order(hasil$RMSE), ]
+hasil
+```
+
+```{r}
+ggplot(hasil, aes(x = reorder(Metode, RMSE), y = RMSE)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Perbandingan RMSE Antar Metode", x = "Metode", y = "RMSE") +
+  theme_minimal()
+```
+
+# 5. Kesimpulan
+
+```{r}
+terbaik <- hasil[1, "Metode"]
+cat("Berdasarkan nilai RMSE dan MAPE terkecil, metode **", terbaik,
+    "** memberikan hasil pemulusan paling akurat untuk data anomali suhu global bulanan ini.\n\n")
+```
+
+Berdasarkan nilai RMSE dan MAPE terkecil, metode SMA (n=3) memberikan hasil pemulusan paling akurat untuk data anomali suhu global ini. Hal ini mengindikasikan bahwa data tidak memiliki pola tren dan musiman yang kuat, sehingga metode sederhana seperti SMA sudah cukup menangkap pola data tanpa perlu komponen tren (DES) maupun musiman (Holt-Winters) yang justru menambah kompleksitas tanpa meningkatkan akurasi.
