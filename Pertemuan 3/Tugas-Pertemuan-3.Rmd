@@ -1,0 +1,365 @@
+---
+title: "Tugas-Pertemuan-3"
+output: html_document
+---
+
+```{r}
+# =========================================================
+# 1. SETUP
+# =========================================================
+
+library(dLagM)
+library(dynlm)
+library(MLmetrics)
+library(lmtest)
+library(car)
+library(ggplot2)
+library(dplyr)
+
+# =========================================================
+# 2. IMPORT DATA
+# =========================================================
+
+data <- read.csv("C:\\Users\\yuuen\\OneDrive\\Documents\\Kuliah\\IPB\\Semester 5\\MPDW\\mpdw\\Pertemuan 3\\NewDelhi_Air_quality.csv")
+
+str(data)
+head(data)
+summary(data)
+
+data$timestamp_local <- as.POSIXct(
+  data$timestamp_local,
+  format = "%Y-%m-%dT%H:%M:%S"
+)
+
+data <- data[order(data$timestamp_local), ]
+
+data <- data[, c("timestamp_local", "AQI", "o3")]
+
+colSums(is.na(data))
+
+# =========================================================
+# 3. TRAINING - TESTING
+# =========================================================
+
+n <- nrow(data)
+
+n_train <- floor(0.8 * n)
+
+train <- data[1:n_train, ]
+test  <- data[(n_train + 1):n, ]
+
+nrow(train)
+nrow(test)
+```
+Sebanyak 57 observasi pertama digunakan sebagai data training untuk membentuk model, sedangkan 15 observasi terakhir digunakan sebagai data testing untuk mengevaluasi kemampuan p
+
+
+```{r}
+ggplot(data, aes(x = timestamp_local, y = AQI)) +
+  geom_line() +
+  labs(
+    title = "Pergerakan AQI New Delhi",
+    x = "Waktu",
+    y = "AQI"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(data, aes(x = o3, y = AQI)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Hubungan O3 dengan AQI",
+    x = "O3",
+    y = "AQI"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+# =========================================================
+# 4. MODEL KOYCK
+# =========================================================
+
+model.koyck <- koyckDlm(
+  x = train$o3,
+  y = train$AQI
+)
+
+summary(model.koyck)
+```
+Berdasarkan hasil estimasi model Koyck, diperoleh persamaan:
+
+$$AQI_t = 0{,}54798 + 0{,}41955AQI_{t-1} + 0{,}25830O3_t + e_t$$
+
+Koefisien variabel O3 pada waktu ke-t sebesar 0,25830 dengan nilai p-value sebesar 6,25 × 10⁻⁸, sehingga variabel O3 berpengaruh signifikan terhadap AQI pada taraf nyata 5%. Koefisien yang bernilai positif menunjukkan bahwa peningkatan konsentrasi O3 pada waktu ke-t cenderung diikuti oleh peningkatan AQI. Setiap kenaikan satu satuan O3 dikaitkan dengan peningkatan AQI sebesar 0,25830 satuan dengan mempertahankan komponen lain dalam model.
+
+Koefisien AQI pada lag 1 sebesar 0,41955 dengan p-value sebesar 4,63 × 10⁻⁶, sehingga signifikan pada taraf nyata 5%. Hal ini menunjukkan adanya persistensi pada AQI, yaitu nilai AQI pada waktu sebelumnya memiliki hubungan dengan nilai AQI pada waktu sekarang. Dengan demikian, kondisi AQI pada periode sebelumnya turut memberikan informasi dalam menjelaskan AQI pada periode sekarang.
+
+Nilai R-squared sebesar 0,9463 menunjukkan bahwa sekitar 94,63% variasi AQI pada data training dapat dijelaskan oleh model Koyck, sedangkan sekitar 5,37% sisanya dijelaskan oleh faktor lain di luar model.
+
+
+
+```{r}
+# =========================================================
+# 5. DLM - CARI LAG OPTIMUM
+# =========================================================
+
+dlm.auto <- finiteDLMauto(
+  formula = AQI ~ o3,
+  data = data.frame(train),
+  q.min = 1,
+  q.max = 10,
+  model.type = "dlm",
+  error.type = "AIC",
+  trace = TRUE
+)
+
+dlm.auto
+```
+```{r}
+# Lag dengan AIC terkecil
+q.opt <- dlm.auto$q[which.min(dlm.auto$AIC)]
+
+q.opt
+```
+Berdasarkan hasil pemilihan lag menggunakan kriteria Akaike Information Criterion (AIC) dengan kandidat lag 1 sampai 10, diperoleh nilai AIC terkecil pada lag 10, yaitu sebesar 22,971. Oleh karena itu, lag optimum yang dipilih untuk model Distributed Lag Model (DLM) adalah q = 10.
+
+Pemilihan lag 10 menunjukkan bahwa model DLM mempertimbangkan pengaruh O3 pada waktu sekarang hingga 10 periode sebelumnya dalam menjelaskan AQI. Karena data yang digunakan memiliki interval waktu per jam, maka model mempertimbangkan informasi konsentrasi O3 hingga sekitar 10 jam sebelumnya.
+
+Nilai AIC digunakan untuk membandingkan beberapa model dengan kompleksitas yang berbeda, sehingga pemilihan lag 10 menunjukkan bahwa model dengan 10 lag memberikan keseimbangan terbaik antara goodness of fit dan kompleksitas model berdasarkan kriteria AIC.
+
+```{r}
+# =========================================================
+# DLM FINAL
+# =========================================================
+
+model.dlm <- dlm(
+  x = train$o3,
+  y = train$AQI,
+  q = q.opt
+)
+
+summary(model.dlm)
+```
+Berdasarkan hasil estimasi model DLM dengan lag optimum q = 10, model memasukkan variabel O3 pada waktu ke-t hingga O3 pada lag 10. Nilai R-squared yang diperoleh sebesar 0,9871 menunjukkan bahwa sekitar 98,71% variasi AQI pada data training dapat dijelaskan oleh model DLM.
+
+Koefisien O3 pada waktu ke-t sebesar 0,405638 dengan p-value < 0,001. Hal tersebut menunjukkan bahwa O3 pada waktu ke-t berpengaruh signifikan terhadap AQI pada taraf nyata 5% dengan arah hubungan positif.
+
+Selain itu, O3 pada lag 7 memiliki koefisien sebesar 0,287823 dengan p-value sebesar 0,024, O3 pada lag 8 memiliki koefisien sebesar -0,399437 dengan p-value sebesar 0,002, O3 pada lag 9 memiliki koefisien sebesar 0,304147 dengan p-value sebesar 0,006, dan O3 pada lag 10 memiliki koefisien sebesar -0,098958 dengan p-value sebesar 0,047. Keempat lag tersebut signifikan pada taraf nyata 5%.
+
+Sementara itu, O3 pada lag 1 sampai lag 6 tidak menunjukkan pengaruh yang signifikan secara individual pada taraf nyata 5%. Dengan demikian, meskipun model DLM menggunakan lag hingga 10 periode berdasarkan hasil pemilihan AIC, tidak seluruh koefisien lag secara individual signifikan.
+
+Adanya perubahan tanda koefisien pada beberapa lag menunjukkan bahwa hubungan O3 dengan AQI pada masing-masing lag tidak selalu memiliki arah yang sama. Oleh karena itu, interpretasi lebih lanjut terhadap masing-masing koefisien lag perlu dilakukan secara hati-hati.
+
+
+```{r}
+# =========================================================
+# 6. ARDL - CARI LAG OPTIMUM
+# =========================================================
+
+orders.ardl <- ardlBoundOrders(
+  data = data.frame(train[, c("AQI", "o3")]),
+  formula = AQI ~ o3,
+  ic = "AIC",
+  max.p = 6,
+  max.q = 6,
+  FullSearch = TRUE
+)
+
+orders.ardl$p
+orders.ardl$q
+orders.ardl$min.Stat
+```
+```{r}
+p.opt <- as.numeric(orders.ardl$p)
+q.opt <- as.numeric(orders.ardl$q)
+
+p.opt
+q.opt
+```
+Berdasarkan hasil pemilihan orde menggunakan kriteria AIC, diperoleh orde optimum ARDL yaitu p = 2 dan q = 1. Dengan demikian, model memasukkan O3 pada waktu ke-t, O3 pada lag 1, dan O3 pada lag 2, serta AQI pada lag 1.
+
+Pemilihan p = 2 menunjukkan bahwa model mempertimbangkan pengaruh O3 hingga dua periode sebelumnya. Sementara itu, q = 1 menunjukkan bahwa model mempertimbangkan satu lag dari variabel AQI. Dengan demikian, model ARDL tidak hanya mempertimbangkan pengaruh O3 pada periode sekarang dan periode sebelumnya, tetapi juga mempertimbangkan ketergantungan nilai AQI terhadap nilai AQI pada periode sebelumnya.
+
+```{r}
+# =========================================================
+# ARDL FINAL
+# =========================================================
+
+model.ardl <- ardlDlm(
+  formula = AQI ~ o3,
+  data = train,
+  p = p.opt,
+  q = q.opt
+)
+
+summary(model.ardl)
+```
+Berdasarkan hasil estimasi model ARDL, diperoleh koefisien O3 pada waktu ke-t sebesar 0,480286 dengan p-value sebesar 2,47 × 10⁻¹². Nilai tersebut lebih kecil dari taraf nyata 5%, sehingga O3 pada waktu ke-t berpengaruh signifikan terhadap AQI. Koefisien positif menunjukkan bahwa peningkatan konsentrasi O3 pada periode sekarang cenderung diikuti oleh peningkatan AQI.
+
+Koefisien O3 pada lag 1 sebesar -0,097207 dengan p-value sebesar 0,3627 dan O3 pada lag 2 sebesar -0,004654 dengan p-value sebesar 0,9314. Kedua p-value tersebut lebih besar dari 0,05, sehingga O3 pada lag 1 dan lag 2 tidak berpengaruh signifikan secara individual terhadap AQI.
+
+Koefisien AQI pada lag 1 sebesar 0,185468 dengan p-value sebesar 0,0445. Karena p-value lebih kecil dari 0,05, maka AQI pada lag 1 berpengaruh signifikan terhadap AQI pada waktu sekarang. Koefisien positif menunjukkan adanya persistensi AQI, sehingga nilai AQI periode sebelumnya berkaitan dengan nilai AQI periode sekarang.
+
+Nilai R-squared sebesar 0,9771 menunjukkan bahwa sekitar 97,71% variasi AQI pada data training dapat dijelaskan oleh model ARDL, sedangkan sekitar 2,29% sisanya dijelaskan oleh faktor lain di luar model. Selain itu, nilai F-statistic sebesar 532,4 dengan p-value < 2,2 × 10⁻¹⁶ menunjukkan bahwa model secara keseluruhan signifikan pada taraf nyata 5%.
+
+```{r}
+# =========================================================
+# 7. FORECAST
+# =========================================================
+
+# Koyck
+fore.koyck <- forecast(
+  model = model.koyck,
+  x = test$o3,
+  h = nrow(test)
+)
+
+# DLM
+fore.dlm <- forecast(
+  model = model.dlm,
+  x = test$o3,
+  h = nrow(test)
+)
+
+# ARDL
+fore.ardl <- forecast(
+  model = model.ardl,
+  x = test$o3,
+  h = nrow(test)
+)
+```
+
+```{r}
+# =========================================================
+# 8. MAPE
+# =========================================================
+
+mape.koyck <- MAPE(
+  fore.koyck$forecasts,
+  test$AQI
+)
+
+mape.dlm <- MAPE(
+  fore.dlm$forecasts,
+  test$AQI
+)
+
+mape.ardl <- MAPE(
+  fore.ardl$forecasts,
+  test$AQI
+)
+
+mape.koyck
+mape.dlm
+mape.ardl
+```
+Berdasarkan hasil forecasting pada 15 observasi data testing, diperoleh nilai MAPE sebesar 3,1873% untuk model Koyck, 1,2744% untuk model DLM, dan 0,6848% untuk model ARDL.
+
+Nilai MAPE yang semakin kecil menunjukkan performa forecasting yang semakin baik. Berdasarkan hasil tersebut, model ARDL memiliki performa forecasting terbaik karena menghasilkan nilai MAPE paling kecil, yaitu sebesar 0,6848%. Selanjutnya, model DLM memiliki performa terbaik kedua dengan MAPE sebesar 1,2744%, sedangkan model Koyck memiliki performa forecasting paling rendah dengan MAPE sebesar 3,1873%.
+
+Dengan demikian, berdasarkan kriteria MAPE, model ARDL merupakan model yang paling baik dalam melakukan forecasting AQI pada data testing.
+
+```{r}
+# =========================================================
+# 9. DEVIANCE / SSE DATA TESTING
+# =========================================================
+
+dev.koyck <- sum(
+  (test$AQI - fore.koyck$forecasts)^2
+)
+
+dev.dlm <- sum(
+  (test$AQI - fore.dlm$forecasts)^2
+)
+
+dev.ardl <- sum(
+  (test$AQI - fore.ardl$forecasts)^2
+)
+
+hasil.forecast <- data.frame(
+  Model = c("Koyck", "DLM", "ARDL"),
+  MAPE = c(
+    mape.koyck,
+    mape.dlm,
+    mape.ardl
+  ),
+  Deviance = c(
+    dev.koyck,
+    dev.dlm,
+    dev.ardl
+  )
+)
+
+hasil.forecast
+```
+Berdasarkan hasil perhitungan kesalahan forecasting pada data testing, diperoleh nilai SSE sebesar 10,1464 untuk model Koyck, 1,7001 untuk model DLM, dan 0,5507 untuk model ARDL.
+
+Nilai SSE yang semakin kecil menunjukkan bahwa jumlah kuadrat kesalahan hasil forecasting semakin kecil, sehingga model memiliki performa prediksi yang lebih baik. Berdasarkan hasil tersebut, model ARDL memiliki nilai SSE terkecil yaitu sebesar 0,5507, diikuti oleh model DLM sebesar 1,7001 dan model Koyck sebesar 10,1464.
+
+Hasil tersebut menunjukkan bahwa model ARDL memberikan hasil forecasting paling baik berdasarkan kriteria SSE pada data testing.
+
+
+```{r}
+# =========================================================
+# 10. UJI ASUMSI
+# =========================================================
+
+# Koyck
+dwtest(model.koyck$model)
+
+# DLM
+dwtest(model.dlm$model)
+
+# ARDL
+dwtest(model.ardl$model)
+```
+Berdasarkan uji Durbin-Watson, diperoleh p-value sebesar 0,07733 untuk model Koyck, 0,6603 untuk model DLM, dan 0,9870 untuk model ARDL. Seluruh p-value lebih besar dari taraf nyata 5%.
+
+Dengan demikian, tidak terdapat cukup bukti untuk menolak hipotesis nol yang menyatakan tidak terdapat autokorelasi positif pada residual. Oleh karena itu, berdasarkan uji Durbin-Watson yang dilakukan, ketiga model tidak menunjukkan adanya bukti autokorelasi positif pada residual.
+
+```{r}
+bptest(model.koyck$model)
+
+bptest(model.dlm$model)
+
+bptest(model.ardl$model)
+```
+Berdasarkan uji Breusch-Pagan, diperoleh p-value sebesar 1,183 × 10⁻⁵ untuk model Koyck, 0,6252 untuk model DLM, dan 5,443 × 10⁻⁶ untuk model ARDL.
+
+Pada taraf nyata 5%, model Koyck memiliki p-value lebih kecil dari 0,05 sehingga hipotesis nol ditolak. Hal tersebut menunjukkan adanya indikasi heteroskedastisitas pada residual model Koyck.
+
+Pada model DLM, p-value sebesar 0,6252 lebih besar dari 0,05 sehingga hipotesis nol gagal ditolak. Dengan demikian, tidak terdapat bukti yang cukup mengenai adanya heteroskedastisitas pada residual model DLM.
+
+Sementara itu, model ARDL memiliki p-value sebesar 5,443 × 10⁻⁶ yang lebih kecil dari 0,05 sehingga hipotesis nol ditolak. Dengan demikian, terdapat indikasi heteroskedastisitas pada residual model ARDL.
+
+Berdasarkan uji Breusch-Pagan, model DLM merupakan model yang tidak menunjukkan indikasi heteroskedastisitas.
+
+```{r}
+shapiro.test(residuals(model.koyck$model))
+
+shapiro.test(residuals(model.dlm$model))
+
+shapiro.test(residuals(model.ardl$model))
+```
+Berdasarkan uji Shapiro-Wilk, diperoleh p-value sebesar 0,7033 untuk model Koyck, 0,3455 untuk model DLM, dan 0,00392 untuk model ARDL.
+
+Pada taraf nyata 5%, model Koyck memiliki p-value lebih besar dari 0,05 sehingga hipotesis nol gagal ditolak. Dengan demikian, residual model Koyck tidak menunjukkan penyimpangan yang signifikan dari distribusi normal.
+
+Model DLM juga memiliki p-value sebesar 0,3455 yang lebih besar dari 0,05, sehingga hipotesis nol gagal ditolak. Dengan demikian, residual model DLM tidak menunjukkan penyimpangan yang signifikan dari distribusi normal.
+
+Sementara itu, model ARDL memiliki p-value sebesar 0,00392 yang lebih kecil dari 0,05 sehingga hipotesis nol ditolak. Hal tersebut menunjukkan bahwa residual model ARDL tidak berdistribusi normal.
+
+Dengan demikian, berdasarkan uji Shapiro-Wilk, model Koyck dan DLM memenuhi asumsi normalitas residual, sedangkan model ARDL tidak memenuhi asumsi tersebut.
+
+**Kesimpulan**
+Berdasarkan hasil analisis, model Koyck, DLM, dan ARDL memiliki karakteristik dan performa yang berbeda. Model Koyck menghasilkan MAPE sebesar 3,1873% dan SSE sebesar 10,1464 sehingga memiliki performa forecasting paling rendah dibandingkan kedua model lainnya. Model DLM dengan lag optimum 10 menghasilkan MAPE sebesar 1,2744% dan SSE sebesar 1,7001. Sementara itu, model ARDL dengan orde optimum p = 2 dan q = 1 menghasilkan MAPE sebesar 0,6848% dan SSE sebesar 0,5507, sehingga memberikan performa forecasting terbaik.
+
+Berdasarkan pengujian asumsi, ketiga model tidak menunjukkan bukti autokorelasi positif pada residual. Model DLM tidak menunjukkan indikasi heteroskedastisitas dan residualnya konsisten dengan distribusi normal. Model Koyck memenuhi asumsi normalitas tetapi menunjukkan indikasi heteroskedastisitas. Sementara itu, model ARDL menunjukkan indikasi heteroskedastisitas dan residual tidak berdistribusi normal.
+
+Dengan demikian, jika kriteria utama yang digunakan adalah performa forecasting, model ARDL merupakan model terbaik karena menghasilkan nilai MAPE dan SSE paling kecil. Namun, jika mempertimbangkan pemenuhan asumsi residual, model DLM memiliki hasil yang lebih baik karena tidak menunjukkan indikasi autokorelasi positif, heteroskedastisitas, maupun penyimpangan normalitas residual.
+
+
+
